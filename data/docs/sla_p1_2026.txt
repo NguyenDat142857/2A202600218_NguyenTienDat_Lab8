@@ -1,0 +1,1 @@
+SLA ticket P1 phải được xử lý trong vòng 4 giờ.
