@@ -1,4 +1,3 @@
-# 2A202600218_NguyenTienDat_Lab8
 # Lab Day 08 — Full RAG Pipeline
 
 **Môn:** AI in Action (AICB-P1)  
