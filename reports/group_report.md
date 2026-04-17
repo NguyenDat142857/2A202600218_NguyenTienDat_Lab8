@@ -1,11 +1,6 @@
 # Báo Cáo Nhóm — Lab Day 08: Full RAG Pipeline
 
-**Tên nhóm:** Cá nhân (Solo Project)  
-
-**Thành viên:**
-| Tên | Vai trò | Email |
-|-----|---------|-------|
-| Nguyễn Tiến Đạt | Full-stack (Retrieval + LLM + Eval + Docs) | ___ |
+**Tên nhóm:** C401 
 
 **Ngày nộp:** 14/04/2026  
 **Repo:** ___  
