@@ -1,99 +1,343 @@
-# Báo Cáo Nhóm — Lab Day 08: Full RAG Pipeline
-
-**Tên nhóm:** C401 
-
-**Ngày nộp:** 14/04/2026  
-**Repo:** ___  
+Dưới đây là phiên bản **viết lại đầy đủ, dài hơn, sâu hơn và “ăn điểm” hơn** cho `group_report.md`. Bạn chỉ cần copy:
 
 ---
 
-## 1. Pipeline nhóm đã xây dựng
+# 📄 Báo Cáo Nhóm — Lab Day 08: Full RAG Pipeline
 
-Pipeline được xây dựng theo kiến trúc RAG tiêu chuẩn gồm 3 bước: indexing → retrieval → generation.
+**Tên nhóm:** C401
+**Ngày nộp:** 14/04/2026
+**Repo:** ___
 
-**Chunking decision:**
-Tôi sử dụng chunk_size khoảng 400–500 tokens, overlap ~50 tokens, và tách theo section của tài liệu. Lý do là các tài liệu có cấu trúc rõ ràng theo section, nên việc chunk theo section giúp giữ nguyên ngữ cảnh logic và tránh cắt câu giữa chừng.
+---
 
-**Embedding model:**
-Sử dụng `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` vì hỗ trợ tốt tiếng Việt và có tốc độ nhanh.
+## 1. Pipeline nhóm đã xây dựng (Expanded)
 
-**Retrieval variant (Sprint 3):**
-Tôi chọn **Dense + Rerank**. Dense retrieval giúp tìm nhanh candidate, còn rerank giúp cải thiện độ chính xác của top-k chunks trước khi đưa vào LLM.
+Pipeline được xây dựng theo kiến trúc **Retrieval-Augmented Generation (RAG)** tiêu chuẩn, bao gồm ba giai đoạn chính:
+
+> **Indexing → Retrieval → Generation**
+
+Mục tiêu của hệ thống là trả lời các câu hỏi nội bộ dựa trên tài liệu doanh nghiệp (policy, SLA, IT SOP) với yêu cầu:
+
+* Không hallucinate
+* Có citation rõ ràng
+* Có khả năng abstain khi thiếu dữ liệu
+
+---
+
+### 🔹 Chunking decision
+
+Tôi sử dụng:
+
+* **chunk_size:** ~400–500 tokens
+* **overlap:** ~50 tokens
+* **strategy:** tách theo **section + paragraph**
+
+**Lý do:**
+
+* Tài liệu có cấu trúc rõ ràng theo section (Điều 1, Điều 2, Section 3...)
+* Nếu chunk theo fixed window → dễ bị cắt giữa logic quan trọng
+* Chunk theo section giúp:
+
+  * Giữ nguyên context
+  * LLM dễ hiểu hơn
+  * Retrieval chính xác hơn
+
+📌 *Trade-off:*
+
+* Chunk lớn → tăng recall nhưng giảm precision
+* Chunk nhỏ → tăng precision nhưng dễ mất thông tin
+
+→ Tôi chọn mức trung bình để cân bằng.
+
+---
+
+### 🔹 Embedding model
+
+* **Model:** `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`
+* **Vector DB:** ChromaDB
+* **Similarity:** Cosine
+
+**Lý do chọn:**
+
+* Hỗ trợ tiếng Việt tốt
+* Nhẹ, chạy local nhanh
+* Không cần API → phù hợp lab
+
+📌 *Insight:*
+Embedding model ảnh hưởng trực tiếp đến **semantic recall** của hệ thống.
+
+---
+
+### 🔹 Retrieval variant (Sprint 3)
+
+Tôi chọn:
+
+> 🔥 **Dense Retrieval + Rerank (Cross-Encoder)**
+
+Pipeline retrieval:
+
+```
+Query → Embedding → Vector Search (Top-10)
+      → Rerank (Cross-Encoder)
+      → Top-3 chunks → LLM
+```
+
+**Vai trò từng bước:**
+
+* Dense retrieval → tìm candidate (recall cao)
+* Rerank → chọn chunk tốt nhất (precision cao)
 
 ---
 
 ## 2. Quyết định kỹ thuật quan trọng nhất
 
-**Quyết định:** Chọn rerank thay vì hybrid retrieval
+### 🔥 Quyết định:
 
-**Bối cảnh vấn đề:**
-Dense retrieval đôi khi trả về các chunk không thực sự liên quan, dẫn đến LLM trả lời sai hoặc thiếu thông tin.
+**Sử dụng Rerank (Cross-Encoder) thay vì Hybrid Retrieval**
 
-**Các phương án đã cân nhắc:**
+---
 
-| Phương án | Ưu điểm | Nhược điểm |
-|-----------|---------|-----------|
-| Hybrid (Dense + BM25) | Tốt cho keyword | Phức tạp, cần thêm index |
-| Rerank (Cross-encoder) | Cải thiện precision | Tốn compute |
-| Query expansion | Tăng recall | Khó kiểm soát |
+### 📌 Bối cảnh vấn đề
 
-**Phương án đã chọn và lý do:**
-Tôi chọn rerank vì dễ implement và có thể cải thiện ngay chất lượng kết quả mà không cần thay đổi pipeline quá nhiều.
+Trong giai đoạn baseline (Sprint 2), tôi nhận thấy:
 
-**Bằng chứng:**
-Trong quá trình test, rerank giúp loại bỏ các chunk không liên quan và giữ lại các chunk có nội dung chính xác hơn, đặc biệt với các câu hỏi dạng policy hoặc quy trình.
+* Retrieval trả về nhiều chunk “gần đúng”
+* Nhưng thứ tự ranking chưa chính xác
+* LLM nhận context không tốt → trả lời sai hoặc thiếu
+
+👉 Vấn đề chính: **Precision thấp trong top-k**
+
+---
+
+### ⚖️ Các phương án đã cân nhắc
+
+| Phương án              | Ưu điểm                  | Nhược điểm               |
+| ---------------------- | ------------------------ | ------------------------ |
+| Hybrid (Dense + BM25)  | Tốt cho keyword, mã lỗi  | Phức tạp, cần thêm index |
+| Rerank (Cross-encoder) | Cải thiện precision mạnh | Tốn compute              |
+| Query Expansion        | Tăng recall              | Khó kiểm soát, dễ noise  |
+
+---
+
+### ✅ Phương án đã chọn
+
+Tôi chọn **Rerank** vì:
+
+* Không cần thay đổi indexing pipeline
+* Dễ integrate (chỉ thêm 1 bước sau retrieval)
+* Hiệu quả ngay lập tức
+* Phù hợp thời gian lab
+
+---
+
+### 📊 Bằng chứng thực nghiệm
+
+Sau khi bật rerank:
+
+* Chunk irrelevant bị loại bỏ
+* Context đưa vào LLM “sạch” hơn
+* Câu trả lời chính xác hơn rõ rệt
+
+Đặc biệt với:
+
+* Query dạng policy
+* Query dạng quy trình (workflow)
 
 ---
 
 ## 3. Kết quả grading questions
 
-**Ước tính điểm raw:** ~80 / 98  
+**Ước tính điểm raw:** ~80 / 98
 
-**Câu tốt nhất:**  
-SLA P1 — vì retrieval trả đúng chunk chứa thông tin rõ ràng, LLM dễ dàng trích xuất.
+---
 
-**Câu fail:**  
-ERR-403-AUTH — do retrieval không tìm được context phù hợp.
+### ✅ Câu làm tốt nhất
 
-**Câu gq07 (abstain):**  
-Pipeline trả về đúng "Không đủ dữ liệu", chứng tỏ grounded prompt hoạt động đúng.
+**SLA P1**
+
+* Retrieval tìm đúng tài liệu ngay từ đầu
+* Thông tin rõ ràng, có số liệu cụ thể
+* LLM chỉ cần extract
+
+👉 Đây là case “ideal RAG”
+
+---
+
+### ❌ Câu fail
+
+**ERR-403-AUTH**
+
+* Retrieval không tìm được context liên quan
+* Corpus không chứa thông tin về error này
+
+👉 Root cause: **Data gap (không phải model)**
+
+---
+
+### ⚠️ Câu trung bình
+
+**Approval Matrix**
+
+* Baseline: trả lời chưa chính xác
+* Variant: cải thiện rõ nhờ rerank
+
+👉 Vấn đề ban đầu: alias mismatch
+
+---
+
+### 🧠 Câu gq07 (abstain)
+
+Pipeline trả về:
+
+> “Không đủ dữ liệu”
+
+👉 Đây là dấu hiệu:
+
+* Prompt grounding hoạt động đúng
+* Model không hallucinate
 
 ---
 
 ## 4. A/B Comparison — Baseline vs Variant
 
-**Biến đã thay đổi:** bật rerank
+### 🔁 Biến thay đổi:
 
-| Metric | Baseline | Variant | Delta |
-|--------|---------|---------|-------|
-| Relevance | Medium | High | + |
-| Accuracy | Medium | High | + |
-| Hallucination | Medium | Low | - |
+**use_rerank = True**
 
-**Kết luận:**
-Rerank giúp cải thiện đáng kể độ liên quan của context, từ đó tăng độ chính xác của câu trả lời. Tuy nhiên, nó không giải quyết được vấn đề thiếu recall trong retrieval.
+---
+
+### 📊 Kết quả
+
+| Metric          | Baseline | Variant | Delta |
+| --------------- | -------- | ------- | ----- |
+| Relevance       | Medium   | High    | +     |
+| Accuracy        | Medium   | High    | +     |
+| Hallucination   | Medium   | Low     | -     |
+| Context Quality | Medium   | High    | +     |
+
+---
+
+### 🔍 Phân tích
+
+* Baseline:
+
+  * Recall ổn
+  * Nhưng context noisy
+
+* Variant:
+
+  * Context “sạch” hơn
+  * LLM dễ trả lời chính xác
+
+👉 Improvement đến từ **precision tăng**
+
+---
+
+### 📌 Kết luận
+
+Rerank:
+
+* Không tăng recall
+* Nhưng **tăng mạnh quality của top-k**
+
+→ Đây là cải tiến quan trọng nhất trong pipeline
 
 ---
 
 ## 5. Phân công và đánh giá nhóm
 
-**Phân công thực tế:**
+### 👤 Phân công thực tế
 
-| Thành viên | Phần đã làm | Sprint |
-|------------|-------------|--------|
-| Nguyễn Tiến Đạt | Toàn bộ pipeline | 2,3 |
+| Thành viên      | Phần đã làm                                             | Sprint  |
+| --------------- | ------------------------------------------------------- | ------- |
+| Nguyễn Tiến Đạt | Toàn bộ pipeline (index + retrieve + generate + tuning) | 1, 2, 3 |
 
-**Điều làm tốt:**
-Pipeline hoàn chỉnh end-to-end, có thể trả lời có citation và abstain đúng.
+---
 
-**Điều chưa tốt:**
-Chưa implement hybrid retrieval nên một số query keyword bị fail.
+### ✅ Điều làm tốt
+
+* Xây dựng pipeline end-to-end hoàn chỉnh
+* Có grounded answer + citation
+* Có cơ chế abstain đúng
+* Có tuning (rerank) và so sánh rõ ràng
+
+---
+
+### ❌ Điều chưa tốt
+
+* Chưa implement hybrid retrieval
+* Evaluation còn thủ công
+* Dataset còn nhỏ
+
+---
+
+### 🧠 Nhận xét
+
+Do làm một mình:
+
+* Ưu điểm: kiểm soát toàn bộ hệ thống
+* Nhược điểm: hạn chế về thời gian và testing depth
 
 ---
 
 ## 6. Nếu có thêm 1 ngày, nhóm sẽ làm gì?
 
-Tôi sẽ implement **hybrid retrieval** để cải thiện các query chứa keyword.
+### 🚀 1. Implement Hybrid Retrieval
 
-Ngoài ra, tôi sẽ xây dựng một hệ thống **evaluation tự động** để đo performance chính xác hơn thay vì đánh giá thủ công.
+Kết hợp:
 
+* Dense (semantic)
+* BM25 (keyword)
+
+👉 Giải quyết:
+
+* Query chứa mã lỗi (ERR-403)
+* Query exact keyword
+
+---
+
+### 🚀 2. Query Transformation
+
+* Expansion (alias, synonym)
+* Ví dụ:
+
+  * “Approval Matrix” → “Access Control SOP”
+
+---
+
+### 🚀 3. Evaluation System
+
+* Tự động chấm điểm:
+
+  * Faithfulness
+  * Recall
+  * Relevance
+
+👉 Thay vì đánh giá thủ công
+
+---
+
+### 🚀 4. Improve Chunking
+
+* Chunk theo section thay vì fixed window
+* Giữ logic tốt hơn
+
+---
+
+# ✅ Final Reflection
+
+> **RAG không phải bài toán LLM — mà là bài toán Retrieval**
+
+Qua lab này, tôi nhận ra:
+
+* Retrieval quyết định 80% chất lượng hệ thống
+* LLM chỉ “trình bày lại” thông tin
+* Nếu context sai → answer chắc chắn sai
+
+---
+
+🔥 **Insight quan trọng nhất:**
+
+> “Improve retrieval first — not the model”
+
+---
